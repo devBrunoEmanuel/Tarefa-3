@@ -2,9 +2,10 @@
 gerar_imagem.py
 ===============
 
-Gera a imagem de teste em escala de cinza e a salva em formato .npy (array NumPy
-puro, que carrega rapido e nao depende de bibliotecas de imagem). Opcionalmente,
-se a biblioteca Pillow estiver instalada, salva tambem um .png para visualizacao.
+Gera a imagem de teste em escala de cinza e a salva como PNG.
+
+Usa OpenCV (cv2) para salvar -- a mesma biblioteca que o professor ensinou
+(pagina 9 dos slides: "pip install opencv-python"). Como fallback, tenta PIL.
 
 Por que uma imagem grande e com ruido?
 
@@ -13,8 +14,8 @@ Por que uma imagem grande e com ruido?
       dominaria e nao haveria ganho. Por padrao geramos 3000x3000 = 9 megapixels.
     - COM RUIDO "SAL E PIMENTA": pixels aleatorios viram preto (0) ou branco (255).
       Esse e exatamente o tipo de ruido que o filtro de MEDIANA remove muito bem
-      e o filtro de MEDIA apenas borra, o que torna a comparacao entre os dois
-      filtros mais interessante.
+      e o filtro de MEDIA apenas borra, tornando a comparacao entre os dois
+      filtros mais interessante (slides paginas 4-8).
 
 Uso:
     py gerar_imagem.py                 # 3000x3000, 5% de ruido, semente fixa
@@ -29,11 +30,11 @@ def gerar(altura, largura, fracao_ruido, semente):
     """Cria uma imagem (altura x largura) uint8 com gradiente + circulos + ruido."""
     rng = np.random.default_rng(semente)
 
-    # 1) Fundo: um gradiente suave (de escuro para claro) para haver estrutura.
+    # 1) Fundo: gradiente suave (de escuro para claro) para haver estrutura.
     linha = np.linspace(0, 255, largura, dtype=np.float64)
     img = np.tile(linha, (altura, 1))
 
-    # 2) Alguns circulos claros e escuros, para ter bordas/objetos definidos.
+    # 2) Circulos claros e escuros para ter bordas e objetos definidos.
     yy, xx = np.mgrid[0:altura, 0:largura]
     for _ in range(8):
         cy = rng.integers(0, altura)
@@ -54,27 +55,40 @@ def gerar(altura, largura, fracao_ruido, semente):
     return img
 
 
+def salvar_imagem(img, caminho):
+    """Salva imagem uint8 2D como PNG. Tenta cv2; fallback PIL; fallback npy."""
+    try:
+        import cv2
+        cv2.imwrite(caminho, img)
+        print(f"Imagem salva em {caminho} ({img.shape[0]}x{img.shape[1]}, via OpenCV)")
+        return
+    except ImportError:
+        pass
+    try:
+        from PIL import Image
+        Image.fromarray(img).save(caminho)
+        print(f"Imagem salva em {caminho} ({img.shape[0]}x{img.shape[1]}, via PIL)")
+        return
+    except ImportError:
+        pass
+    # Ultimo recurso: salva como .npy (sequencial e paralelo aceitam qualquer formato)
+    caminho_npy = caminho.rsplit(".", 1)[0] + ".npy"
+    import numpy as np
+    np.save(caminho_npy, img)
+    print(f"cv2 e PIL nao instalados; salvo como {caminho_npy} (instale opencv-python)")
+
+
 def main():
     p = argparse.ArgumentParser(description="Gera a imagem de teste em escala de cinza.")
     p.add_argument("--altura", type=int, default=3000)
     p.add_argument("--largura", type=int, default=3000)
-    p.add_argument("--ruido", type=float, default=0.05, help="fracao de pixels com ruido (0..1)")
-    p.add_argument("--semente", type=int, default=42, help="semente do gerador (reprodutibilidade)")
-    p.add_argument("--saida", type=str, default="imagem.npy")
+    p.add_argument("--ruido", type=float, default=0.05)
+    p.add_argument("--semente", type=int, default=42)
+    p.add_argument("--saida", type=str, default="imagem.png")
     args = p.parse_args()
 
     img = gerar(args.altura, args.largura, args.ruido, args.semente)
-    np.save(args.saida, img)
-    print(f"Imagem salva em {args.saida}: {img.shape[0]}x{img.shape[1]} ({img.dtype})")
-
-    # PNG opcional, apenas para visualizar (nao e necessario para o benchmark).
-    try:
-        from PIL import Image
-        caminho_png = args.saida.rsplit(".", 1)[0] + ".png"
-        Image.fromarray(img).save(caminho_png)
-        print(f"Visualizacao salva em {caminho_png}")
-    except Exception:
-        print("(Pillow nao instalado; .png nao gerado, mas o .npy basta para o benchmark.)")
+    salvar_imagem(img, args.saida)
 
 
 if __name__ == "__main__":

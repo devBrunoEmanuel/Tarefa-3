@@ -2,40 +2,39 @@
 paralelo_mpi.py
 ===============
 
-Versao PARALELA com MPI (mpi4py). A imagem e dividida em FAIXAS DE LINHAS, uma
-para cada processo. Cada processo filtra apenas a sua faixa e, ao final, os
-pedacos sao reunidos no processo 0.
+Versao PARALELA com MPI (mpi4py).
 
-Pontos exigidos pelo enunciado e como sao atendidos aqui:
+Estrategia de distribuicao (alinhada com os slides do professor - pagina 13):
 
-  * "uso de operacoes com maiuscula (buffer numpy) para toda comunicacao de
-    dados de imagem": usamos Scatterv / Gatherv / Sendrecv (TODAS com inicial
-    maiuscula). Essas versoes trabalham diretamente sobre o buffer de memoria do
-    array NumPy, sem serializar com pickle (que e o que as versoes minusculas,
-    como ``scatter``/``gather``/``bcast``, fariam). So usamos a versao minuscula
-    (``bcast``) para 2 numeros inteiros (altura e largura), que nao sao "dados de
-    imagem".
+    1. O processo 0 le a imagem com cv2 (OpenCV).
+    2. comm.Bcast envia a IMAGEM INTEIRA para TODOS os processos.
+       - Uppercase = operacao de buffer: usa o buffer de memoria do array NumPy
+         diretamente, SEM serializar com pickle. Para imagens grandes isso e
+         MUITO mais rapido que a versao minuscula (ver "Regra de ouro" - pag.15).
+    3. Cada processo calcula QUAIS linhas sao suas (via calcular_particao).
+    4. Para filtrar, cada processo extrai do seu proprio exemplar da imagem as
+       linhas que precisa, INCLUINDO 1 linha halo acima e abaixo (vizinhos de
+       borda). Isso resolve a "limitacao nas bordas" mencionada na pagina 13:
+       como todos ja tem a imagem completa, buscar as linhas vizinhas e trivial,
+       sem precisar de Sendrecv.
+    5. Gatherv reune os pedacos filtrados no processo 0.
 
-  * Fronteiras entre processos (linhas-fantasma / halo): para filtrar a primeira
-    e a ultima linha da sua faixa, cada processo precisa de 1 linha do vizinho de
-    cima e 1 do vizinho de baixo. Essas linhas sao trocadas com Sendrecv.
+Metodologia de medicao (pagina 16 dos slides):
+    - warm-up : repeticoes iniciais descartadas antes de ligar o cronometro.
+    - sincronizacao: Barrier() antes e depois de cada iteracao.
+    - isolamento de ruido: as 30 repeticoes ficam DENTRO do script Python.
+      O mpiexec e executado UMA SO VEZ por numero de processos, evitando o
+      overhead de "inicio frio" do ambiente MPI em cada amostra.
+    - outliers: removidos pelo metodo IQR (bench_utils.py).
 
-  * Numero de processos que nao divide a altura: distribuimos o resto entre os
-    primeiros processos (alguns recebem 1 linha a mais). Por isso usamos as
-    versoes "v" (Scatterv/Gatherv), que aceitam blocos de tamanhos diferentes.
-
-  * Metodologia de medicao: a inicializacao do MPI e a distribuicao da imagem
-    (Scatterv) sao feitas UMA vez, ANTES do laco de medicao. Dentro do laco
-    medimos apenas o custo que se repete a cada aplicacao do filtro: troca de
-    halo + calculo. Assim nao pagamos o custo fixo de inicializacao em cada
-    amostra (ele e simetrico e seria so ruido).
-
-Uso (lancado UMA vez por contagem de processos):
-    mpiexec -n 4 py paralelo_mpi.py --filtro media --reps 15 --imagem imagem.npy --saida par_media_4.json
+Uso:
+    mpiexec -n 4 py paralelo_mpi.py --filtro media   --imagem imagem.png --saida par_media_4.json
+    mpiexec -n 4 py paralelo_mpi.py --filtro mediana --imagem imagem.png --saida par_mediana_4.json
 """
 
 import argparse
 import numpy as np
+import cv2
 from mpi4py import MPI
 
 from filtros import FILTROS
@@ -45,31 +44,38 @@ from particao import calcular_particao
 
 def main():
     comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
+    rank = comm.Get_rank()   # identidade deste processo (0 = "chefe")
+    size = comm.Get_size()   # total de processos (o P do mpiexec -n P)
 
     p = argparse.ArgumentParser(description="Versao paralela (MPI) dos filtros.")
     p.add_argument("--filtro", choices=list(FILTROS.keys()), required=True)
-    p.add_argument("--reps", type=int, default=15)
-    p.add_argument("--aquecimento", type=int, default=2)
-    p.add_argument("--imagem", type=str, default="imagem.npy")
+    p.add_argument("--reps", type=int, default=30,
+                   help="repeticoes medidas dentro do loop (pagina 16 dos slides)")
+    p.add_argument("--aquecimento", type=int, default=2,
+                   help="repeticoes de warm-up descartadas (pagina 16 dos slides)")
+    p.add_argument("--imagem", type=str, default="imagem.png")
     p.add_argument("--saida", type=str, default=None)
     args = p.parse_args()
 
     kernel = FILTROS[args.filtro]
 
     # ------------------------------------------------------------------
-    # 1) Apenas o processo 0 le a imagem do disco. Os demais ainda nao a tem.
+    # 1) Apenas o processo 0 le a imagem do disco com OpenCV (pagina 9).
     # ------------------------------------------------------------------
     if rank == 0:
-        img = np.load(args.imagem)
+        img = cv2.imread(args.imagem, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise FileNotFoundError(
+                f"Imagem '{args.imagem}' nao encontrada ou formato nao suportado.")
         img = np.ascontiguousarray(img, dtype=np.uint8)
         altura, largura = img.shape
     else:
         img = None
         altura = largura = None
 
-    # Apenas 2 inteiros (NAO sao dados de imagem) -> pode usar bcast minusculo.
+    # 2) Broadcast das DIMENSOES - apenas 2 inteiros, nao sao dados de imagem.
+    #    A versao minuscula (bcast) e aceitavel aqui: e rapido e sem pickle
+    #    relevante para apenas 2 numeros.
     altura = comm.bcast(altura, root=0)
     largura = comm.bcast(largura, root=0)
 
@@ -79,72 +85,64 @@ def main():
         return
 
     # ------------------------------------------------------------------
-    # 2) Particao por linhas e distribuicao da imagem com Scatterv (UMA vez).
+    # 3) comm.Bcast envia a IMAGEM INTEIRA para todos os processos.
+    #    MAIUSCULO = operacao de buffer NumPy (sem pickle) -> muito mais rapido.
+    #    Cada processo vai trabalhar com a sua copia local da imagem.
+    #    (Resposta da pergunta de reflexao 3: Bcast vs bcast)
+    # ------------------------------------------------------------------
+    if rank != 0:
+        img = np.empty((altura, largura), dtype=np.uint8)  # buffer de recepcao
+
+    comm.Bcast(img, root=0)  # <<< MAIUSCULO: buffer numpy, sem pickle
+
+    # ------------------------------------------------------------------
+    # 4) Calcula a particao: quais linhas sao responsabilidade deste processo.
     # ------------------------------------------------------------------
     linhas_por_processo, counts, deslocamentos = calcular_particao(altura, size, largura)
-    minhas_linhas = linhas_por_processo[rank]
-
-    # Buffer de recepcao do meu bloco (achatado em 1D).
-    recv = np.empty(minhas_linhas * largura, dtype=np.uint8)
-
-    # Scatterv: envia para cada processo o seu bloco de linhas. As versoes "v"
-    # permitem blocos de tamanhos diferentes (counts/deslocamentos).
-    origem = [img.ravel() if rank == 0 else None, counts, deslocamentos, MPI.UNSIGNED_CHAR]
-    comm.Scatterv(origem, recv, root=0)
-
-    bloco_local = recv.reshape(minhas_linhas, largura)
+    start_row = sum(linhas_por_processo[:rank])           # primeira linha minha
+    end_row   = start_row + linhas_por_processo[rank]     # limite superior (excl.)
 
     # ------------------------------------------------------------------
-    # 3) Buffer com halo: 2 linhas a mais (uma em cima, uma embaixo) para
-    #    guardar as linhas-fantasma vindas dos vizinhos.
+    # 5) Laco de medicao.
+    #    Cada iteracao = extrair fatia com halo + aplicar filtro.
+    #    Nao ha Sendrecv: cada processo ja tem a imagem inteira via Bcast e
+    #    busca as linhas vizinhas diretamente.
+    #    (Trata a "limitacao nas bordas" da pagina 13: como todos tem a imagem
+    #    completa, pegar a linha do vizinho e apenas uma fatia de array local.)
     # ------------------------------------------------------------------
-    buf = np.empty((minhas_linhas + 2, largura), dtype=np.uint8)
-    buf[1:-1] = bloco_local
-
-    # Quem sao meus vizinhos. PROC_NULL = "nao ha vizinho" (bordas globais da
-    # imagem). Sendrecv com PROC_NULL nao faz nada (vira no-op).
-    vizinho_cima = rank - 1 if rank > 0 else MPI.PROC_NULL
-    vizinho_baixo = rank + 1 if rank < size - 1 else MPI.PROC_NULL
-
     local_saida = None
-
-    # ------------------------------------------------------------------
-    # 4) Laco de medicao. Cada iteracao = troca de halo + aplicacao do filtro.
-    # ------------------------------------------------------------------
     tempos = []
+
     for _ in range(args.aquecimento + args.reps):
-        comm.Barrier()                 # alinha todos os processos antes de medir
+        comm.Barrier()   # sincronizacao: todos chegam aqui antes do cronometro
         t0 = MPI.Wtime()
 
-        # Por padrao, replica a propria borda (vale para quem nao tem vizinho).
-        buf[0] = buf[1]
-        buf[-1] = buf[-2]
+        # Fatia COM halo: inclui 1 linha acima e 1 abaixo (quando existem),
+        # para que o kernel calcule as bordas da faixa com vizinhanca correta.
+        halo_top = max(0, start_row - 1)
+        halo_bot = min(altura, end_row + 1)
+        sub = img[halo_top:halo_bot]   # shape: (my_lines + 0/1/2, largura)
 
-        # Troca de halo com Sendrecv (operacao MAIUSCULA, buffer numpy):
-        #  - envio minha 1a linha para cima e recebo no halo de cima a ultima
-        #    linha do vizinho de cima;
-        #  - envio minha ultima linha para baixo e recebo no halo de baixo a 1a
-        #    linha do vizinho de baixo.
-        comm.Sendrecv(buf[1].copy(), dest=vizinho_cima, recvbuf=buf[0], source=vizinho_cima)
-        comm.Sendrecv(buf[-2].copy(), dest=vizinho_baixo, recvbuf=buf[-1], source=vizinho_baixo)
+        filtered_sub = kernel(sub)
 
-        # Aplica o filtro ao bloco JA com halo e descarta as 2 linhas de halo.
-        # As linhas internas que sobram foram calculadas com vizinhanca correta,
-        # ficando IDENTICAS ao resultado sequencial.
-        saida_com_halo = kernel(buf)
-        local_saida = np.ascontiguousarray(saida_com_halo[1:-1])
+        # Descarta a(s) linha(s) de halo do resultado.
+        # offset=0 se start_row==0 (global top), offset=1 caso contrario.
+        offset = start_row - halo_top
+        local_saida = np.ascontiguousarray(
+            filtered_sub[offset : offset + linhas_por_processo[rank]]
+        )
 
-        comm.Barrier()                 # garante que todos terminaram
+        comm.Barrier()   # sincronizacao: todos terminaram
         t1 = MPI.Wtime()
 
-        # Tempo da iteracao = tempo do processo MAIS LENTO (o que importa em paralelo).
+        # Tempo = processo mais LENTO (todos esperam pelo gargalo).
         dt = comm.reduce(t1 - t0, op=MPI.MAX, root=0)
         if rank == 0:
             tempos.append(dt)
 
     # ------------------------------------------------------------------
-    # 5) Reune os blocos no processo 0 com Gatherv (UMA vez, fora da medicao)
-    #    para permitir conferir a corretude do resultado.
+    # 6) Gatherv reune os pedacos filtrados no processo 0.
+    #    Uppercase + MPI.UNSIGNED_CHAR = buffer numpy, sem pickle.
     # ------------------------------------------------------------------
     if rank == 0:
         imagem_filtrada = np.empty(altura * largura, dtype=np.uint8)
@@ -155,7 +153,7 @@ def main():
     comm.Gatherv(local_saida.ravel(), destino, root=0)
 
     # ------------------------------------------------------------------
-    # 6) Apenas o processo 0 calcula estatisticas e grava o resultado.
+    # 7) Apenas o processo 0 calcula estatisticas e grava resultados.
     # ------------------------------------------------------------------
     if rank == 0:
         imagem_filtrada = imagem_filtrada.reshape(altura, largura)
@@ -175,8 +173,9 @@ def main():
         caminho = args.saida or f"par_{args.filtro}_{size}.json"
         salvar_json(caminho, resultado)
 
-        # Salva tambem a imagem filtrada (para conferencia/visualizacao).
-        np.save(f"saida_{args.filtro}_{size}p.npy", imagem_filtrada)
+        # Salva a imagem filtrada como PNG (OpenCV).
+        saida_png = f"saida_{args.filtro}_{size}p.png"
+        cv2.imwrite(saida_png, imagem_filtrada)
 
         print(f"[PAR {args.filtro} n={size}] media = {estat['media']:.4f}s  "
               f"variancia = {estat['variancia']:.2e}  "

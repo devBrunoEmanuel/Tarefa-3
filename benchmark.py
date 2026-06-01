@@ -43,10 +43,11 @@ def executar(comando):
 
 def main():
     p = argparse.ArgumentParser(description="Orquestra o benchmark sequencial vs MPI.")
-    p.add_argument("--imagem", type=str, default="imagem.npy")
+    p.add_argument("--imagem", type=str, default="imagem.png")
     p.add_argument("--filtros", type=str, default="media,mediana")
     p.add_argument("--processos", type=str, default="2,4,8")
-    p.add_argument("--reps", type=int, default=15)
+    p.add_argument("--reps", type=int, default=30,
+                   help="iteracoes dentro do loop (pagina 16 dos slides: 30 iteracoes)")
     p.add_argument("--aquecimento", type=int, default=2)
     args = p.parse_args()
 

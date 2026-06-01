@@ -2,13 +2,22 @@
 teste_corretude.py
 ==================
 
-Teste que NAO usa MPI. Ele simula em numpy puro exatamente a logica de particao
-+ halo + filtragem da versao paralela (paralelo_mpi.py) e confere se o resultado
-reunido fica IDENTICO ao da versao sequencial.
+Teste que NAO usa MPI. Ele simula em numpy puro exatamente a logica que
+paralelo_mpi.py executa com o MPI e confere se o resultado reunido fica
+IDENTICO ao da versao sequencial.
 
-Isso valida a parte algoritmica (divisao por linhas, linhas-fantasma, bordas)
-mesmo sem ter o ambiente MPI instalado. Rode com:
+Logica simulada (alinhada com a versao Bcast do paralelo_mpi.py):
+    1. Todos os processos tem a imagem inteira (simulando o comm.Bcast).
+    2. Cada "processo" calcula start_row/end_row via calcular_particao.
+    3. Extrai a fatia img[halo_top:halo_bot] (com 1 linha de halo em cada borda).
+    4. Aplica o kernel e descarta a(s) linha(s) de halo do resultado.
 
+Isso valida que:
+    - A divisao por linhas (incluindo alturas nao divisiveis) esta correta.
+    - A logica de halo resolve a "limitacao nas bordas" da pagina 13 dos slides.
+    - O resultado paralelo e identico ao sequencial.
+
+Rode com:
     py teste_corretude.py
 """
 
@@ -18,32 +27,27 @@ from filtros import FILTROS
 from particao import calcular_particao
 
 
-def parperalelo_simulado(img, kernel, n_processos):
-    """Reproduz, sem MPI, o que paralelo_mpi.py faz com n_processos."""
+def paralelo_simulado(img, kernel, n_processos):
+    """Simula o que paralelo_mpi.py faz com n_processos, sem MPI."""
     altura, largura = img.shape
     linhas_por_processo, counts, deslocamentos = calcular_particao(altura, n_processos, largura)
 
     blocos_saida = []
-    inicio = 0
     for r in range(n_processos):
-        minhas_linhas = linhas_por_processo[r]
-        if minhas_linhas == 0:
-            continue
-        bloco_local = img[inicio:inicio + minhas_linhas]
+        start_row = sum(linhas_por_processo[:r])
+        end_row   = start_row + linhas_por_processo[r]
 
-        # Buffer com halo (2 linhas extras), como em paralelo_mpi.py
-        buf = np.empty((minhas_linhas + 2, largura), dtype=np.uint8)
-        buf[1:-1] = bloco_local
+        # Extrai fatia COM halo (1 linha acima e abaixo quando existem),
+        # exatamente como paralelo_mpi.py faz apos receber a imagem via Bcast.
+        halo_top = max(0, start_row - 1)
+        halo_bot = min(altura, end_row + 1)
+        sub = img[halo_top:halo_bot]
 
-        # Halo de cima: linha do vizinho de cima OU replicacao (borda global)
-        buf[0] = img[inicio - 1] if r > 0 else bloco_local[0]
-        # Halo de baixo: linha do vizinho de baixo OU replicacao (borda global)
-        fim = inicio + minhas_linhas
-        buf[-1] = img[fim] if r < n_processos - 1 else bloco_local[-1]
+        filtered_sub = kernel(sub)
 
-        saida_com_halo = kernel(buf)
-        blocos_saida.append(saida_com_halo[1:-1])
-        inicio += minhas_linhas
+        # Descarta linha(s) de halo; guarda apenas as linhas desta particao.
+        offset = start_row - halo_top  # 0 se borda global do topo; 1 caso contrario
+        blocos_saida.append(filtered_sub[offset : offset + linhas_por_processo[r]])
 
     return np.vstack(blocos_saida)
 
@@ -56,11 +60,11 @@ def main():
     for (altura, largura) in [(10, 7), (101, 33), (256, 100), (333, 64)]:
         img = rng.integers(0, 256, size=(altura, largura), dtype=np.uint8)
         for nome, kernel in FILTROS.items():
-            esperado = kernel(img)  # sequencial
+            esperado = kernel(img)  # referencia sequencial
             for n_processos in [1, 2, 3, 4, 8]:
                 if n_processos > altura:
                     continue
-                obtido = parperalelo_simulado(img, kernel, n_processos)
+                obtido = paralelo_simulado(img, kernel, n_processos)
                 if np.array_equal(obtido, esperado):
                     status = "OK  "
                 else:
