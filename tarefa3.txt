@@ -1,0 +1,23 @@
+============
+ATIVIDADE AVALIATIVA
+============
+
+Nesta atividade, além da apresentação, solicito a entrega do código e relatório.
+
+A ideia central é comparar filtros de imagem utilizando o MPI.
+
+Em grupo, implemente e compare dois filtros de suavização diferentes aplicados à mesma imagem. Sugiro utilizarem o filtro de média 3×3 (já visto em aula) e um filtro de mediana 3×3 (valor do pixel central substituído pela mediana dos 9 vizinhos, não pela média). Contudo, tanto a imagem como o 2º filtro ficam à escolha do grupo. No caso da imagem, lembre-se de escolher uma imagem que realmente demande paralelização de sua plataforma computacional.
+
+Como detalhes dos experimentos, ambos devem ter:
+ - versão sequencial e versão paralela com MPI;
+ - uso de operações com maiúscula (buffer numpy) para toda comunicação de dados de imagem.
+
+Ao final, calculem o speedup e variância, além de remover outliers seguindo a metodologia do exercício de benchmark da aula. Ou seja, neste caso, o testador não deve iniciar todo o ambiente MPI via comando mpiexec para não forçar um início frio do teste com a inicialização de toda a rede MPI em cada teste. Explicando: neste caso, o overhead de inicialização é simétrico e todos pagam o mesmo custo. Assim, não é necessário que o testador inicie tudo pois só adicionaria tempo extra à simulação.
+
+Inclua no relatório a tabela de speedup (sequencial vs 2, 4 e 8 processos) para cada filtro e gráfico de tempo por número de processos.
+
+REFLITA E ANOTE
+- O filtro de mediana paralelo teve speedup maior ou menor que o de média? Por quê?
+- O que acontece com os pixels nas fronteiras entre processos? O grupo tratou isso? Como?
+- Por que foi usado comm.Bcast e não comm.bcast para enviar a imagem? O que mudaria no desempenho?
+- Se o número de processos não divide exatamente a altura da imagem, o que o código faz? 
