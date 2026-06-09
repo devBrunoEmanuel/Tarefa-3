@@ -56,6 +56,15 @@ def main():
 
     python = sys.executable  # mesmo interpretador que esta rodando este script
 
+    # MS-MPI pode nao estar no PATH; usa o caminho fixo se necessario
+    mpiexec = "mpiexec"
+    mpi_fixo = r"C:\Program Files\Microsoft MPI\Bin\mpiexec.exe"
+    if not any(
+        os.path.exists(os.path.join(d, "mpiexec.exe"))
+        for d in os.environ.get("PATH", "").split(os.pathsep)
+    ) and os.path.exists(mpi_fixo):
+        mpiexec = mpi_fixo
+
     # 1) Garante a imagem de teste.
     if not os.path.exists(args.imagem):
         print("Imagem nao encontrada; gerando uma nova...")
@@ -76,7 +85,7 @@ def main():
         # --- Paralelo (2, 4, 8 ...) ---
         for nproc in lista_processos:
             saida_par = f"par_{filtro}_{nproc}.json"
-            executar(["mpiexec", "-n", str(nproc), python, "paralelo_mpi.py",
+            executar([mpiexec, "-n", str(nproc), python, "paralelo_mpi.py",
                       "--filtro", filtro, "--reps", str(args.reps),
                       "--aquecimento", str(args.aquecimento),
                       "--imagem", args.imagem, "--saida", saida_par])
