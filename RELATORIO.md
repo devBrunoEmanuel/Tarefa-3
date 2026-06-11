@@ -4,8 +4,8 @@
 **Atividade:** Comparação de filtros de suavização (média 3×3 vs mediana 3×3),
 sequencial vs paralelo com MPI.
 
-**Grupo:** _(preencher nomes)_
-**Data:** _(preencher)_
+**Grupo:** *(preencher nomes)*
+**Data:** *(preencher)*
 
 > **Nota sobre os números desta versão:** os valores de tempo, variância e
 > speedup marcados como `XX` são **lacunas a preencher** com a saída de
@@ -25,7 +25,7 @@ com remoção de outliers, e analisar o comportamento de cada filtro ao paraleli
 ## 2. Filtros escolhidos
 
 | Filtro | Descrição | Código |
-|---|---|---|
+| --- | --- | --- |
 | **Média 3×3** | Cada pixel vira a média aritmética dos 9 vizinhos. | [filtros.py:33](filtros.py#L33) |
 | **Mediana 3×3** | Cada pixel vira a mediana (valor do meio) dos 9 vizinhos. | [filtros.py:49](filtros.py#L49) |
 
@@ -35,7 +35,7 @@ preservando bordas e removendo muito bem ruído "sal e pimenta".
 
 ## 3. Imagem escolhida
 
-- **Tipo:** escala de cinza, gerada por [gerar_imagem.py](gerar_imagem.py)
+- **Tipo:** escala de cinza, gerada por [gerar_imagem.py](./gerar_imagem.py)
   (gradiente + círculos + ruído sal e pimenta), com semente fixa (reprodutível).
 - **Tamanho:** 3000 × 3000 = **9 megapixels** (ajustável).
 - **Justificativa (demanda de paralelização):** uma imagem desse porte tem ~9
@@ -49,7 +49,7 @@ preservando bordas e removendo muito bem ruído "sal e pimenta".
 ### 4.1 Estratégia de paralelização (decomposição por linhas)
 
 A imagem é dividida em **faixas horizontais de linhas**, uma por processo
-([particao.py](particao.py)). Cada processo filtra só a sua faixa e o processo 0
+([particao.py](./particao.py)). Cada processo filtra só a sua faixa e o processo 0
 junta tudo no final. Comunicação:
 
 - **Distribuição:** `comm.Scatterv` ([paralelo_mpi.py:93](paralelo_mpi.py#L93)).
@@ -91,26 +91,26 @@ sequencial.
 **Filtro de média 3×3**
 
 | Processos | Tempo médio (s) | Variância | Speedup | Eficiência |
-|-----------|-----------------|-----------|---------|------------|
-| 1 (seq)   | XX.XX           | XX        | 1.00    | 1.00       |
-| 2         | XX.XX           | XX        | XX      | XX         |
-| 4         | XX.XX           | XX        | XX      | XX         |
-| 8         | XX.XX           | XX        | XX      | XX         |
+| --- | --- | --- | --- | --- |
+| 1 (seq) | XX.XX | XX | 1.00 | 1.00 |
+| 2 | XX.XX | XX | XX | XX |
+| 4 | XX.XX | XX | XX | XX |
+| 8 | XX.XX | XX | XX | XX |
 
 **Filtro de mediana 3×3**
 
 | Processos | Tempo médio (s) | Variância | Speedup | Eficiência |
-|-----------|-----------------|-----------|---------|------------|
-| 1 (seq)   | XX.XX           | XX        | 1.00    | 1.00       |
-| 2         | XX.XX           | XX        | XX      | XX         |
-| 4         | XX.XX           | XX        | XX      | XX         |
-| 8         | XX.XX           | XX        | XX      | XX         |
+| --- | --- | --- | --- | --- |
+| 1 (seq) | XX.XX | XX | 1.00 | 1.00 |
+| 2 | XX.XX | XX | XX | XX |
+| 4 | XX.XX | XX | XX | XX |
+| 8 | XX.XX | XX | XX | XX |
 
 ### 5.2 Gráfico de tempo por número de processos
 
 ![Tempo por número de processos](tempo_por_processos.png)
 
-_(Gerado automaticamente por `benchmark.py` em `tempo_por_processos.png`.)_
+*(Gerado automaticamente por `benchmark.py` em `tempo_por_processos.png`.)*
 
 ### 5.3 Padrão esperado
 
@@ -159,18 +159,7 @@ Distribui o resto entre os primeiros processos: os primeiros
 334, 333, 333. Por isso usamos as versões **"v"** (`Scatterv`/`Gatherv`), que
 aceitam blocos de tamanhos diferentes.
 
-## 7. Verificação de correção
-
-Mesmo sem o ambiente MPI, validamos a lógica de partição + halo + bordas
-simulando-a em numpy puro ([teste_corretude.py](teste_corretude.py)) e comparando
-com o sequencial, para vários tamanhos e contagens de processos, **inclusive
-alturas não divisíveis**:
-
-```
->>> TODOS OS TESTES PASSARAM: paralelo == sequencial (incluindo bordas e divisao desigual).
-```
-
-## 8. Como reproduzir
+## 7. Como reproduzir
 
 ```powershell
 py -m pip install -r requirements.txt   # numpy, mpi4py, matplotlib, Pillow
@@ -183,7 +172,7 @@ Saídas: `resultados_speedup.csv`, `tabela_speedup.md`, `tempo_por_processos.png
 
 ## 9. Conclusão
 
-_(Preencher após rodar.)_ Ambos os filtros se beneficiam da paralelização, mas o
+*(Preencher após rodar.)* Ambos os filtros se beneficiam da paralelização, mas o
 filtro de **mediana** — por ser mais intensivo em CPU — apresenta **speedup
 superior** ao de **média**, que é mais limitado por comunicação/memória. O
 tratamento de fronteiras por halo garante resultado idêntico ao sequencial, e a

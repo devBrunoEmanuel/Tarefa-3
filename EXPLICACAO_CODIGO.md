@@ -16,8 +16,7 @@ Este documento explica **cada arquivo e cada linha relevante** com base nos
 6. [`sequencial.py` — versão sequencial](#6-sequencialpy)
 7. [`paralelo_mpi.py` — versão paralela MPI](#7-paralelo_mpipy)
 8. [`benchmark.py` — orquestrador](#8-benchmarkpy)
-9. [`teste_corretude.py` — teste sem MPI](#9-teste_corretudepy)
-10. [Respostas às perguntas de reflexão](#10-respostas-às-perguntas-de-reflexão)
+9. [Respostas às perguntas de reflexão](#9-respostas-às-perguntas-de-reflexão)
 
 ---
 
@@ -365,23 +364,7 @@ mpiexec, utilize o loop de 30 iterações dentro do script Python."
 
 ---
 
-## 9. `teste_corretude.py`
-
-Teste **sem MPI** que simula a lógica do `paralelo_mpi.py` em numpy puro:
-
-- Para cada "processo" simulado: calcula `start_row`/`end_row`, extrai
-  `img[halo_top:halo_bot]`, aplica kernel, descarta halo.
-- Compara com o sequencial para vários tamanhos e contagens de processos,
-  **inclusive alturas não divisíveis**.
-
-Resultado verificado:
-```
->>> TODOS OS TESTES PASSARAM: paralelo == sequencial (incluindo bordas e divisao desigual).
-```
-
----
-
-## 10. Respostas às perguntas de reflexão
+## 9. Respostas às perguntas de reflexão
 
 **1) O filtro de mediana paralelo teve speedup maior ou menor que o de média? Por
 quê?**
@@ -430,6 +413,4 @@ Distribui o **resto** entre os primeiros processos: os primeiros
 ([particao.py:23-25](particao.py#L23-L25)). Ex.: 1000 linhas / 3 processos →
 `[334, 333, 333]`. Por isso usamos `comm.Gatherv` (versão "v") que aceita blocos
 de **tamanhos diferentes** via `counts` e `deslocamentos`
-([paralelo_mpi.py:129-132](paralelo_mpi.py#L129-L132)). O
-[teste_corretude.py](teste_corretude.py) confirma que nesses casos o resultado
-continua idêntico ao sequencial.
+([paralelo_mpi.py:129-132](paralelo_mpi.py#L129-L132)).
